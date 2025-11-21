@@ -4,18 +4,17 @@ from pydantic import BaseModel, Field, validator
 from typing import List, Optional, Literal
 from datetime import datetime, date
 
-# Initialize App
+
 app = FastAPI(
     title="Coupon Management API",
     description="A simple coupon system for e-commerce use cases.",
     version="1.0.0"
 )
 
-# --- 1. Data Models (Input/Output) [cite: 13-71] ---
+# Data Models 
 
 class Eligibility(BaseModel):
-    """Defines rules for coupon validity."""
-    allowedUserTiers: Optional[List[str]] = None  # e.g. ["NEW", "GOLD"]
+    allowedUserTiers: Optional[List[str]] = None  # ["NEW", "OLD"]
     minLifetimeSpend: Optional[float] = None
     minOrdersPlaced: Optional[int] = None
     firstOrderOnly: Optional[bool] = False
@@ -26,12 +25,11 @@ class Eligibility(BaseModel):
     minItemsCount: Optional[int] = None
 
 class Coupon(BaseModel):
-    """Core Coupon Model [cite: 14]"""
     code: str = Field(..., description="Unique coupon code")
     description: Optional[str] = None
     discountType: Literal["FLAT", "PERCENT"]
     discountValue: float
-    maxDiscountAmount: Optional[float] = None # Only for PERCENT
+    maxDiscountAmount: Optional[float] = None # for percent
     startDate: date
     endDate: date
     usageLimitPerUser: Optional[int] = None
@@ -44,7 +42,6 @@ class CartItem(BaseModel):
     quantity: int
 
 class Cart(BaseModel):
-    """Represents the shopping cart [cite: 52]"""
     items: List[CartItem]
 
     @property
@@ -60,9 +57,8 @@ class Cart(BaseModel):
         return {item.category for item in self.items}
 
 class UserContext(BaseModel):
-    """Represents the user attempting to apply a coupon [cite: 39]"""
     userId: str
-    userTier: Optional[str] = None # e.g. "NEW", "GOLD"
+    userTier: Optional[str] = None # e.g. "NEW", "OLD"
     country: Optional[str] = None
     lifetimeSpend: Optional[float] = 0.0
     ordersPlaced: Optional[int] = 0
@@ -76,22 +72,20 @@ class BestCouponResponse(BaseModel):
     discountAmount: float
     description: str
 
-# --- 2. In-Memory Storage  ---
-# Using a dictionary for O(1) lookups by code, though list is fine for small scale.
+# In-Memory Storage 
+# Using a dictionary 
 COUPON_DB = {}
 
-# --- 3. Logic Helpers ---
 
 def check_eligibility(coupon: Coupon, user: UserContext, cart: Cart) -> bool:
     """
-    Evaluates if a coupon is valid based on 2.2 Supported Eligibility Attributes[cite: 19].
-    Returns True if eligible, False otherwise.
+    Evaluates if a coupon is valid based on 2.2 Supported Eligibility Attributes.
     """
     rules = coupon.eligibility
     if not rules:
         return True
 
-    # --- User-based attributes [cite: 21] ---
+    
     if rules.allowedUserTiers and (user.userTier not in rules.allowedUserTiers):
         return False
     
@@ -107,7 +101,7 @@ def check_eligibility(coupon: Coupon, user: UserContext, cart: Cart) -> bool:
     if rules.allowedCountries and (user.country not in rules.allowedCountries):
         return False
 
-    # --- Cart-based attributes [cite: 28] ---
+    
     if rules.minCartValue and (cart.total_value < rules.minCartValue):
         return False
         
@@ -116,12 +110,12 @@ def check_eligibility(coupon: Coupon, user: UserContext, cart: Cart) -> bool:
         
     cart_cats = cart.unique_categories
     
-    # "Valid if at least one item in cart is from these categories" [cite: 32]
+    # Valid if at least one item in cart is from these categories
     if rules.applicableCategories:
         if not any(cat in cart_cats for cat in rules.applicableCategories):
             return False
             
-    # "Must not appear in the cart" [cite: 33]
+
     if rules.excludedCategories:
         if any(cat in cart_cats for cat in rules.excludedCategories):
             return False
@@ -129,7 +123,7 @@ def check_eligibility(coupon: Coupon, user: UserContext, cart: Cart) -> bool:
     return True
 
 def calculate_discount(coupon: Coupon, cart_value: float) -> float:
-    """Computes discount based on FLAT or PERCENT rules [cite: 84-86]."""
+    """Computes discount based on FLAT or PERCENT rules """
     if coupon.discountType == "FLAT":
         return min(coupon.discountValue, cart_value) # Cannot discount more than total price
     
@@ -141,7 +135,7 @@ def calculate_discount(coupon: Coupon, cart_value: float) -> float:
     
     return 0.0
 
-# --- 4. API Endpoints  ---
+# API Endpoints 
 
 @app.post("/coupons", status_code=201)
 def create_coupon(coupon: Coupon):
@@ -150,7 +144,7 @@ def create_coupon(coupon: Coupon):
     Stores the coupon in memory.
     """
     if coupon.code in COUPON_DB:
-        # Documented choice: Reject duplicates [cite: 77]
+        # Documented choice: Reject duplicates 
         raise HTTPException(status_code=400, detail=f"Coupon code '{coupon.code}' already exists.")
     
     COUPON_DB[coupon.code] = coupon
@@ -173,22 +167,21 @@ def get_best_coupon(request: BestCouponRequest):
     
     eligible_coupons = []
 
-    # 1. Evaluate all coupons [cite: 81]
+    # Evaluate all coupons 
     for coupon in COUPON_DB.values():
         
-        # 2.1 Validity Dates [cite: 82]
+        # Validity Dates 
         if not (coupon.startDate <= today <= coupon.endDate):
             continue
             
-        # 2.2 Usage Limit (Simplified: We aren't tracking actual usage history per user in this DB, 
-        # but logic is placed here for completeness)
+        # check Usage Limit 
         # if coupon.usageLimitPerUser and user_usage_count >= coupon.usageLimitPerUser: continue
         
-        # 2.3 Eligibility Criteria [cite: 83]
+        # Eligibility Criteria 
         if not check_eligibility(coupon, user, cart):
             continue
             
-        # 3. Compute Discount [cite: 84]
+        # Compute Discount 
         discount_amount = calculate_discount(coupon, cart.total_value)
         
         eligible_coupons.append({
@@ -199,10 +192,10 @@ def get_best_coupon(request: BestCouponRequest):
     if not eligible_coupons:
         return None
 
-    # 4. Select Best Coupon [cite: 87]
+    # Select Best Coupon 
     # Sort Rule 1: Highest discount amount (Descending)
-    # Sort Rule 2: Earliest endDate (Ascending) [cite: 89]
-    # Sort Rule 3: Lexicographically smaller code (Ascending) [cite: 90]
+    # Sort Rule 2: Earliest endDate (Ascending) 
+    # Sort Rule 3: Lexicographically smaller code (Ascending) 
     
     best_match = sorted(
         eligible_coupons,
